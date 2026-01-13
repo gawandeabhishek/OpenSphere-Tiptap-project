@@ -2,8 +2,13 @@
 
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useRef, useState } from "react";
+import { Table } from "@tiptap/extension-table";
+import TableRow from "@tiptap/extension-table-row";
+import TableCell from "@tiptap/extension-table-cell";
+import TableHeader from "@tiptap/extension-table-header";
+import { useEffect, useRef, useState, useCallback } from "react";
 
+import { TopToolbar } from "./TopToolbar";
 import { FloatingToolbar } from "./FloatingToolbar";
 import { usePagination } from "@/hooks/usePagination";
 import {
@@ -20,9 +25,34 @@ export default function EditorWithPagination() {
 
   const { pageCount, calculatePagination } = usePagination();
 
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    const proseMirror = editorRef.current.querySelector(".ProseMirror");
+    if (!proseMirror) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (editorRef.current) {
+        calculatePagination(editorRef.current);
+      }
+    });
+
+    resizeObserver.observe(proseMirror);
+    return () => resizeObserver.disconnect();
+  }, [calculatePagination]);
+
   const editor = useEditor({
-    extensions: [StarterKit],
-    content: "<p>Start typing your document here...</p>",
+    extensions: [
+      StarterKit,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableCell,
+      TableHeader,
+    ],
+    content: `
+      <h1>Legal Document</h1>
+      <p>Start typing your document here. The page breaks will update as you type.</p>
+    `,
     immediatelyRender: false,
 
     onUpdate: () => {
@@ -34,6 +64,7 @@ export default function EditorWithPagination() {
     onSelectionUpdate: ({ editor }) => {
       const { from, to } = editor.state.selection;
 
+      // Hide toolbar if no selection or only whitespace selected
       if (from === to) {
         setShowToolbar(false);
         return;
@@ -48,9 +79,13 @@ export default function EditorWithPagination() {
       const coords = editor.view.coordsAtPos(from);
       setToolbarPos({
         x: coords.left,
-        y: coords.top - 56,
+        y: coords.top - 60,
       });
       setShowToolbar(true);
+    },
+
+    onBlur: () => {
+      setShowToolbar(false);
     },
   });
 
@@ -59,45 +94,65 @@ export default function EditorWithPagination() {
     calculatePagination(editorRef.current);
   }, [editor, calculatePagination]);
 
+  const handleEditorClick = useCallback(() => {
+    setShowToolbar(false);
+  }, []);
+
   if (!editor) return null;
 
   return (
-    <div className="flex justify-center py-8 bg-gray-100 min-h-screen">
-      <div className="relative">
-        {/* Page breaks */}
-        {Array.from({ length: pageCount - 1 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute left-0 right-0 border-t-2 border-dashed border-blue-300 pointer-events-none"
-            style={{
-              top: PAGE_MARGIN_PX + PAGE_CONTENT_HEIGHT * (i + 1),
-            }}
-          />
-        ))}
+    <div className="flex flex-col min-h-screen bg-background">
+      <TopToolbar editor={editor} />
 
-        {/* Page */}
+      <div className="flex justify-center py-8 px-4 flex-1">
         <div
-          className="bg-white shadow-xl border"
-          style={{
-            width: PAGE_WIDTH_PX,
-            minHeight: PAGE_HEIGHT_PX * pageCount,
-            padding: PAGE_MARGIN_PX,
-          }}
+          className="relative w-full"
+          style={{ maxWidth: PAGE_WIDTH_PX + 48 }}
         >
-          <div ref={editorRef}>
-            <EditorContent editor={editor} />
-          </div>
-        </div>
+          {/* Page break indicators */}
+          {Array.from({ length: Math.max(0, pageCount - 1) }).map((_, i) => (
+            <div
+              key={`page-break-${i}`}
+              className="absolute left-6 right-6 border-t-2 border-dashed border-muted-foreground/30 pointer-events-none transition-all duration-300"
+              style={{
+                top: PAGE_MARGIN_PX + PAGE_CONTENT_HEIGHT * (i + 1),
+              }}
+              aria-hidden="true"
+            />
+          ))}
 
-        {/* Footer */}
-        <div className="text-center text-sm text-gray-600 mt-3">
-          {pageCount} {pageCount === 1 ? "Page" : "Pages"}
+          {/* Main editor page container */}
+          <div
+            className="bg-card shadow-2xl border border-border rounded-lg overflow-hidden transition-all duration-300"
+            style={{
+              width: PAGE_WIDTH_PX,
+              minHeight: PAGE_HEIGHT_PX * pageCount,
+              padding: PAGE_MARGIN_PX,
+            }}
+            onClick={handleEditorClick}
+            role="region"
+            aria-label="Document editor"
+          >
+            <div ref={editorRef} className="max-w-none">
+              <EditorContent editor={editor} />
+            </div>
+          </div>
+
+          {/* Page counter */}
+          <div className="text-center text-sm text-muted-foreground mt-6 font-medium">
+            {pageCount} {pageCount === 1 ? "page" : "pages"}
+          </div>
+
+          {/* Floating toolbar for text selection */}
+          {showToolbar && editor && (
+            <FloatingToolbar
+              editor={editor}
+              position={toolbarPos}
+              onHide={() => setShowToolbar(false)}
+            />
+          )}
         </div>
       </div>
-
-      {showToolbar && editor && (
-        <FloatingToolbar editor={editor} position={toolbarPos} />
-      )}
     </div>
   );
 }
